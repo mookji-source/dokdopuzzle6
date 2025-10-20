@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>퍼즐 맞추기 게임 (6조각)</title>
+<style>
+  body {
+    background-color: #f0f8ff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh; /* 화면 전체 높이 사용 */
+    margin: 0;
+    overflow: hidden;
+    flex-direction: column; /* 캔버스와 문구를 세로로 배치 */
+    position: relative;
+  }
+  #gameCanvas {
+    background-color: white;
+    border: none;
+    border-radius: 16px;
+    display: block;
+    margin: 0 auto;
+    z-index: 10;
+  }
+
+  /* 승리 메시지 오버레이 스타일 (문구 삭제로 사용되지 않으나, 추후 재사용을 위해 남겨둠) */
+  #winOverlay {
+    display: none; /* 🚨 사용하지 않더라도 초기 숨김 유지 */
+    width: 1200px;
+    margin-top: 20px;
+    z-index: 20; 
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    text-align: center; 
+  }
+  #winMessage {
+    color: #0b3b8c; 
+    font-size: 48px; 
+    font-family: 'Arial Black', sans-serif;
+    padding: 20px 40px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="1200" height="700"></canvas>
+
+<div id="winOverlay" style="display: none;">
+    <div id="winMessage"></div>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const winOverlay = document.getElementById("winOverlay");
+
+// 이미지 로드
+const backgroundImg = new Image();
+backgroundImg.src = "./images/background.png";
+
+const puzzleImgs = [];
+for (let i = 1; i <= 6; i++) {
+  const img = new Image();
+  img.src = `./images/puzzle${i}.png`;
+  puzzleImgs.push(img);
+}
+const winImg = new Image();
+winImg.src = "./images/win.png";
+
+// 사운드 로드 🚨 모든 사운드 변수 삭제됨
+
+// 크기 비율
+const scale = 0.35;
+const bgWidth = 1920 * scale;
+const bgHeight = 1078 * scale;
+const puzzleWidth = 604 * scale;
+const puzzleHeight = 508 * scale;
+
+// 퍼즐 정답 위치
+const yOffset = 20; // 내려주는 정도 (원하는 만큼 조정 가능)
+const canvasBgOffsetX = (canvas.width - bgWidth) / 2; // 캔버스 중앙 정렬 기준
+
+const targetPositions = [
+  {x: 38*scale + canvasBgOffsetX, y: 27*scale + yOffset},
+  {x: (38+604+23)*scale + canvasBgOffsetX, y: 27*scale + yOffset},
+  {x: (38+604+23+604+19)*scale + canvasBgOffsetX, y: 27*scale + yOffset},
+  {x: 38*scale + canvasBgOffsetX, y: (27+508+15)*scale + yOffset},
+  {x: (38+604+23)*scale + canvasBgOffsetX, y: (27+508+15)*scale + yOffset},
+  {x: (38+604+23+604+19)*scale + canvasBgOffsetX, y: (27+508+15)*scale + yOffset},
+];
+
+// 하단 겹쳐진 기본 위치
+const basePieceStartX = 50;
+const basePieceStartY = canvas.height - puzzleHeight - 30;
+const pieceSpacing = 10;
+
+const basePositions = [];
+for (let i = 0; i < 6; i++) {
+    basePositions.push({
+        x: basePieceStartX + (i * (puzzleWidth + pieceSpacing)),
+        y: basePieceStartY
+    });
+}
+
+
+// 무작위 섞기
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+const shuffledOriginalIndices = shuffle(Array.from({length: 6}, (_, i) => i));
+
+// 퍼즐 초기 위치를 섞인 원본 인덱스에 따라 배치
+const puzzlePieces = shuffledOriginalIndices.map((originalIndex, shuffledPosIndex) => ({
+  x: basePositions[shuffledPosIndex].x,
+  y: basePositions[shuffledPosIndex].y,
+  originalIndex: originalIndex,
+  placed: false
+}));
+
+let dragging = false;
+let dragIndex = -1;
+let offsetDragX = 0, offsetDragY = 0;
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // 배경 이미지 그리기
+  ctx.drawImage(backgroundImg, canvasBgOffsetX, yOffset, bgWidth, bgHeight);
+  
+  // 퍼즐 조각 그리기
+  puzzlePieces.forEach((p) => {
+    const img = puzzleImgs[p.originalIndex];
+    ctx.drawImage(img, p.x, p.y, puzzleWidth, puzzleHeight);
+  });
+}
+
+// 드래그 시작
+canvas.addEventListener("mousedown", e => {
+  const mx = e.offsetX, my = e.offsetY;
+  let found = false;
+
+  for (let i = puzzlePieces.length - 1; i >= 0; i--) {
+    const p = puzzlePieces[i];
+    if (p.placed) continue;
+
+    if (mx >= p.x && mx <= p.x + puzzleWidth &&
+        my >= p.y && my <= p.y + puzzleHeight) {
+      dragging = true;
+      
+      const pieceToDrag = puzzlePieces.splice(i, 1)[0];
+      puzzlePieces.push(pieceToDrag);
+      dragIndex = puzzlePieces.length - 1;
+      
+      offsetDragX = mx - pieceToDrag.x;
+      offsetDragY = my - pieceToDrag.y;
+      found = true;
+      break;
+    }
+  }
+  if (found) draw();
+});
+
+// 드래그 중
+canvas.addEventListener("mousemove", e => {
+  if (dragging && dragIndex !== -1) {
+    const mx = e.offsetX, my = e.offsetY;
+    puzzlePieces[dragIndex].x = mx - offsetDragX;
+    puzzlePieces[dragIndex].y = my - offsetDragY;
+    draw();
+  }
+});
+
+// 드래그 끝
+canvas.addEventListener("mouseup", () => {
+  if (dragging && dragIndex !== -1) {
+    const piece = puzzlePieces[dragIndex];
+    const target = targetPositions[piece.originalIndex];
+
+    const dx = piece.x - target.x;
+    const dy = piece.y - target.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    const snapTolerance = 40;
+
+    if (distance < snapTolerance) {
+      // ✅ 정답 위치 스냅
+      piece.x = target.x;
+      piece.y = target.y;
+      piece.placed = true;
+      // successSound.play(); 🚨 삭제
+      checkAllPlaced();
+    } else {
+      // ❌ 오답, 원래 자리로 복귀
+      // fallSound.play(); 🚨 삭제
+
+      const startX = piece.x;
+      const startY = piece.y;
+      
+      const originalBasePos = basePositions[shuffledOriginalIndices.indexOf(piece.originalIndex)];
+      const endX = originalBasePos.x;
+      const endY = originalBasePos.y;
+      
+      let progress = 0;
+
+      function returnAnim() {
+        progress += 0.1;
+        piece.x = startX + (endX - startX) * progress;
+        piece.y = startY + (endY - startY) * progress;
+        draw();
+        if (progress < 1) requestAnimationFrame(returnAnim);
+      }
+      requestAnimationFrame(returnAnim);
+    }
+  }
+  dragging = false;
+  dragIndex = -1;
+  draw();
+});
+
+// 퍼즐 완성 체크 및 애니메이션 함수
+function checkAllPlaced() {
+  if (puzzlePieces.filter(p => p.placed).length === 6) {
+    canvas.style.pointerEvents = 'none'; // 더 이상 클릭 불가
+    
+    setTimeout(() => {
+      // successSound.play(); 🚨 삭제
+      startWipeAnimation(); // 애니메이션 실행
+    }, 500);
+  }
+}
+
+// '닦아내기' 애니메이션 함수
+function startWipeAnimation() {
+  let wipeProgress = 0;
+  const duration = 120; // 애니메이션 지속 시간 (프레임 단위)
+  let frame = 0;
+
+  function animateWipe() {
+    frame++;
+    if (frame > duration) {
+      // 애니메이션 종료 후 문구 및 사운드 재생 🚨 모두 삭제
+      /*
+      setTimeout(() => {
+            winOverlay.style.display = 'flex';
+            seagullsSound.play();
+            seaSound.play();
+        }, 100);
+      */
+      return;
+    }
+
+    wipeProgress = bgWidth * (frame / duration);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // 완성된 이미지 그리기
+    ctx.drawImage(winImg, canvasBgOffsetX, yOffset, bgWidth, bgHeight);
+    
+    // 닦아내는 효과 (흰색 사각형으로 가리기)
+    let clipX = canvasBgOffsetX + wipeProgress;
+    let clipW = bgWidth - wipeProgress;
+    
+    ctx.fillStyle = 'white'; 
+    ctx.fillRect(clipX, yOffset, clipW, bgHeight);
+
+    requestAnimationFrame(animateWipe);
+  }
+
+  if (winImg.complete) {
+    animateWipe();
+  } else {
+    winImg.onload = animateWipe;
+  }
+}
+
+
+// 이미지 로드 후 그리기
+let loadedCount = 0;
+const totalImages = 1 + puzzleImgs.length + 1; // background, puzzle 6개, win 1개
+function checkLoaded() {
+  loadedCount++;
+  if (loadedCount === totalImages) draw();
+}
+backgroundImg.onload = checkLoaded;
+winImg.onload = checkLoaded;
+puzzleImgs.forEach(img => img.onload = checkLoaded);
+</script>
+</body>
+</html>
+/*    /index.html   200
